@@ -1,0 +1,20 @@
+project:
+  name: "Urban Growth AI"
+  version: "1.0"
+
+paths:
+  raw_data: "data/raw"
+  processed_data: "data/processed"
+  sample_data: "data/samples"
+
+model:
+  image_size: 256
+  batch_size: 8
+  learning_rate: 0.0001
+  epochs: 20
+
+visualization:
+  heatmap_opacity: 0.6
+
+streamlit:
+  page_title: "Urban Growth Intelligence Platform"

@@ -1,0 +1,11 @@
+streamlit
+torch==2.2.2+cpu
+torchvision==0.17.2+cpu
+opencv-python-headless
+numpy
+pandas
+matplotlib
+scikit-image
+pillow
+pyyaml
+tqdm
