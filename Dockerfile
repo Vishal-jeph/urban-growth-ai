@@ -11,7 +11,9 @@ RUN pip install --upgrade pip && \
 
 COPY . .
 
+RUN chmod +x start.sh
+
 EXPOSE 8501
 EXPOSE 8000
 
-CMD ["streamlit", "run", "app/frontend/streamlit_app.py"]
+CMD ["./start.sh"]

@@ -1,8 +1,22 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 streamlit
-torch==2.2.2+cpu
-torchvision==0.17.2+cpu
-opencv-python-headless
-numpy
+fastapi
+uvicorn[standard]
+python-multipart
+
+# The "+cpu" build variant only exists for Linux/Windows wheels on the
+# PyTorch index; on macOS the plain version *is* the CPU build.
+torch==2.2.2+cpu; sys_platform != "darwin"
+torch==2.2.2; sys_platform == "darwin"
+torchvision==0.17.2+cpu; sys_platform != "darwin"
+torchvision==0.17.2; sys_platform == "darwin"
+
+# opencv-python-headless>=5 requires numpy>=2, which conflicts with
+# torch==2.2.2 / torchvision==0.17.2 (they predate NumPy 2.0 ABI support and
+# crash with "Numpy is not available" on it). Pin both to stay compatible.
+opencv-python-headless==4.11.0.86
+numpy<2
 pandas
 matplotlib
 scikit-image

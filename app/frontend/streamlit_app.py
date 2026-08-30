@@ -208,7 +208,8 @@ st.subheader("Urban Growth Overlay Visualization")
 
 overlay_image = create_overlay(
     image2,
-    cleaned_map
+    cleaned_map,
+    alpha=config["visualization"]["heatmap_opacity"]
 )
 
 st.image(
@@ -275,7 +276,8 @@ st.subheader("Explainable AI Attention Visualization")
 
 attention_overlay = generate_attention_overlay(
     image2,
-    unet_prediction
+    unet_prediction,
+    alpha=config["visualization"]["heatmap_opacity"]
 )
 
 st.image(
@@ -310,6 +312,9 @@ st.image(
 
 st.subheader("AI Evaluation Metrics")
 
+# Reference: no labeled ground-truth masks are available for the sample
+# imagery, so these scores measure agreement with the classical CV diff
+# (`cleaned_map`), not accuracy against verified ground truth.
 iou_score = calculate_iou(
     thresholded_prediction,
     cleaned_map

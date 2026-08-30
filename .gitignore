@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.DS_Store
+*.log
+
+# LEVIR-CD (academic-use-only, third-party) — fetched locally via
+# scripts/prepare_levir_cd.py, not committed to git.
+data/train/
+data/val/
+data/test/

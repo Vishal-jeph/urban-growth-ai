@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 
 
-def create_overlay(image, change_mask):
+def create_overlay(image, change_mask, alpha=0.35):
 
     overlay = image.copy()
 
@@ -25,8 +25,6 @@ def create_overlay(image, change_mask):
     red_mask = np.zeros_like(image)
 
     red_mask[:, :, 0] = change_mask
-
-    alpha = 0.35
 
     overlay = cv2.addWeighted(
         overlay,

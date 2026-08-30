@@ -1,10 +1,10 @@
 import cv2
-import numpy as np
 
 
 def generate_attention_overlay(
     original_image,
-    prediction_map
+    prediction_map,
+    alpha=0.4
 ):
 
     heatmap = cv2.applyColorMap(
@@ -14,9 +14,9 @@ def generate_attention_overlay(
 
     overlay = cv2.addWeighted(
         original_image,
-        0.6,
+        1 - alpha,
         heatmap,
-        0.4,
+        alpha,
         0
     )
 
