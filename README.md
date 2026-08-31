@@ -45,6 +45,13 @@ Streamlit UI:
 streamlit run app/frontend/streamlit_app.py
 ```
 
+Pick "Upload your own" in the sidebar to try it on your own before/after
+image pair instead of the bundled samples — works best on aerial/satellite
+imagery similar to what the models were trained on (see Results below).
+Model checkpoints load once and are cached across interactions
+(`st.cache_resource`/`st.cache_data`), so moving the threshold slider doesn't
+re-run inference from scratch.
+
 FastAPI service:
 
 ```bash

@@ -69,9 +69,43 @@ logger.info("Starting Streamlit App")
 # -----------------------------------
 # Initialize AI Model
 # -----------------------------------
+# Cached so checkpoints load once per process instead of on every widget
+# interaction (Streamlit reruns this whole script on every rerun).
 
-ai_detector = AIChangeDetector()
-unet_detector = UNetInference()
+
+@st.cache_resource(show_spinner="Loading Siamese CNN...")
+def load_ai_detector():
+    return AIChangeDetector()
+
+
+@st.cache_resource(show_spinner="Loading U-Net...")
+def load_unet_detector():
+    return UNetInference()
+
+
+ai_detector = load_ai_detector()
+unet_detector = load_unet_detector()
+
+# -----------------------------------
+# Cached Inference
+# -----------------------------------
+# Keyed on image content, so moving the threshold slider below doesn't
+# recompute every model's forward pass from scratch.
+
+
+@st.cache_data(show_spinner=False)
+def run_classical_diff(image1, image2):
+    return detect_changes(image1, image2)
+
+
+@st.cache_data(show_spinner="Running Siamese CNN inference...")
+def run_ai_prediction(_detector, image1, image2):
+    return _detector.predict(image1, image2)
+
+
+@st.cache_data(show_spinner="Running U-Net inference...")
+def run_unet_prediction(_detector, image1, image2):
+    return _detector.predict(image1, image2)
 
 # -----------------------------------
 # Streamlit Config
@@ -94,45 +128,66 @@ st.write(
 )
 
 # -----------------------------------
-# Sidebar
+# Sidebar: Image Source
 # -----------------------------------
 
-st.sidebar.header("Sample Satellite Dataset")
+st.sidebar.header("Input Images")
 
-sample_images = get_sample_images()
+input_mode = st.sidebar.radio(
+    "Image source",
+    ["Sample dataset", "Upload your own"]
+)
 
-image_names = [img.name for img in sample_images]
+if input_mode == "Sample dataset":
 
-if len(image_names) < 2:
+    sample_images = get_sample_images()
 
-    st.error(
-        "Please add at least 2 images inside data/samples/"
+    image_names = [img.name for img in sample_images]
+
+    if len(image_names) < 2:
+
+        st.error(
+            "Please add at least 2 images inside data/samples/"
+        )
+
+        st.stop()
+
+    selected_image1 = st.sidebar.selectbox(
+        "Select Historical Image",
+        image_names
     )
 
-    st.stop()
+    selected_image2 = st.sidebar.selectbox(
+        "Select Recent Image",
+        image_names,
+        index=min(1, len(image_names) - 1)
+    )
 
-selected_image1 = st.sidebar.selectbox(
-    "Select Historical Image",
-    image_names
-)
+    image1_source = Path("data/samples") / selected_image1
+    image2_source = Path("data/samples") / selected_image2
 
-selected_image2 = st.sidebar.selectbox(
-    "Select Recent Image",
-    image_names,
-    index=min(1, len(image_names) - 1)
-)
+else:
 
-# -----------------------------------
-# Image Paths
-# -----------------------------------
+    image1_source = st.sidebar.file_uploader(
+        "Historical image",
+        type=["png", "jpg", "jpeg"],
+        key="upload_image1"
+    )
 
-image1_file = Path(
-    "data/samples"
-) / selected_image1
+    image2_source = st.sidebar.file_uploader(
+        "Recent image",
+        type=["png", "jpg", "jpeg"],
+        key="upload_image2"
+    )
 
-image2_file = Path(
-    "data/samples"
-) / selected_image2
+    if image1_source is None or image2_source is None:
+        st.info("Upload both a historical and a recent image to begin.")
+        st.stop()
+
+    st.sidebar.caption(
+        "Models were trained on aerial/satellite building imagery "
+        "(LEVIR-CD) — predictions are most meaningful on similar imagery."
+    )
 
 # -----------------------------------
 # Load Images
@@ -140,9 +195,15 @@ image2_file = Path(
 
 logger.info("Loading satellite images")
 
-image1 = load_image(image1_file)
-
-image2 = load_image(image2_file)
+try:
+    image1 = load_image(image1_source)
+    image2 = load_image(image2_source)
+except Exception:
+    st.error(
+        "Could not read one of the images — please provide valid "
+        "PNG/JPG image files."
+    )
+    st.stop()
 
 # -----------------------------------
 # Resize Images
@@ -171,7 +232,7 @@ st.pyplot(comparison_fig)
 
 logger.info("Running classical CV change detection")
 
-diff_map, cleaned_map = detect_changes(
+diff_map, cleaned_map = run_classical_diff(
     image1,
     image2
 )
@@ -224,6 +285,11 @@ st.image(
 
 st.subheader("AI-Based Urban Change Prediction")
 
+st.caption(
+    "Siamese CNN — trained from scratch on LEVIR-CD (445 pairs), "
+    "test-set IoU 0.10. Weaker of the two models; see README for why."
+)
+
 logger.info("Running AI inference")
 
 # Interactive threshold slider
@@ -235,7 +301,8 @@ threshold = st.slider(
 )
 
 # Run prediction
-ai_prediction = ai_detector.predict(
+ai_prediction = run_ai_prediction(
+    ai_detector,
     image1,
     image2
 )
@@ -251,7 +318,13 @@ thresholded_prediction = (
 
 st.subheader("U-Net Urban Change Prediction")
 
-unet_prediction = unet_detector.predict(
+st.caption(
+    "U-Net — trained from scratch on LEVIR-CD (445 pairs), "
+    "test-set IoU 0.44. The stronger of the two models."
+)
+
+unet_prediction = run_unet_prediction(
+    unet_detector,
     image1,
     image2
 )
