@@ -5,7 +5,6 @@ project:
 paths:
   raw_data: "data/raw"
   processed_data: "data/processed"
-  sample_data: "data/samples"
 
 model:
   image_size: 256

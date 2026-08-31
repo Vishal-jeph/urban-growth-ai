@@ -23,3 +23,11 @@ scikit-image
 pillow
 pyyaml
 tqdm
+
+# Live satellite imagery fetch (Microsoft Planetary Computer, Sentinel-2)
+# and the interactive map picker in the Streamlit app.
+rasterio
+pystac-client
+planetary-computer
+folium
+streamlit-folium

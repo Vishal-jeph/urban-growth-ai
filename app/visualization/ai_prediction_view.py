@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 def plot_ai_prediction(prediction):
 
-    fig, ax = plt.subplots(figsize=(8, 8))
+    fig, ax = plt.subplots(figsize=(5, 5))
 
     heatmap = ax.imshow(
         prediction,

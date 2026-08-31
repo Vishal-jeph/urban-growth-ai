@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 def plot_change_heatmap(diff_map):
 
-    fig, ax = plt.subplots(figsize=(8, 8))
+    fig, ax = plt.subplots(figsize=(5, 5))
 
     heatmap = ax.imshow(diff_map, cmap="hot")
 

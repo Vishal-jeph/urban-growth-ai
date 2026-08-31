@@ -1,4 +1,5 @@
 import sys
+from datetime import date
 from pathlib import Path
 
 # -----------------------------------
@@ -12,15 +13,20 @@ sys.path.append(str(ROOT_DIR))
 # Imports
 # -----------------------------------
 
+import folium
 import streamlit as st
-import numpy as np
+from folium.plugins import Draw
+from streamlit_folium import st_folium
 
 from app.utils.config import load_config
 from app.utils.logger import setup_logger
 
 from app.preprocessing.image_loader import load_image
 from app.preprocessing.preprocess import resize_image
-from app.preprocessing.data_manager import get_sample_images
+from app.preprocessing.satellite_fetch import (
+    fetch_sentinel2_image,
+    SatelliteFetchError
+)
 
 from app.visualization.compare_view import plot_comparison
 from app.visualization.heatmap_view import plot_change_heatmap
@@ -32,10 +38,6 @@ from app.visualization.ai_prediction_view import (
 
 from app.inference.change_detection import detect_changes
 
-from app.inference.model_inference import (
-    AIChangeDetector
-)
-
 from app.inference.urban_analytics import (
     calculate_change_percentage,
     estimate_vegetation_loss,
@@ -43,11 +45,6 @@ from app.inference.urban_analytics import (
     estimate_density
 )
 
-from app.inference.evaluation_metrics import (
-    calculate_iou,
-    calculate_precision,
-    calculate_recall
-)
 from app.inference.unet_inference import (
     UNetInference
 )
@@ -73,23 +70,17 @@ logger.info("Starting Streamlit App")
 # interaction (Streamlit reruns this whole script on every rerun).
 
 
-@st.cache_resource(show_spinner="Loading Siamese CNN...")
-def load_ai_detector():
-    return AIChangeDetector()
-
-
 @st.cache_resource(show_spinner="Loading U-Net...")
 def load_unet_detector():
     return UNetInference()
 
 
-ai_detector = load_ai_detector()
 unet_detector = load_unet_detector()
 
 # -----------------------------------
 # Cached Inference
 # -----------------------------------
-# Keyed on image content, so moving the threshold slider below doesn't
+# Keyed on image content, so re-running the app on the same images doesn't
 # recompute every model's forward pass from scratch.
 
 
@@ -98,14 +89,16 @@ def run_classical_diff(image1, image2):
     return detect_changes(image1, image2)
 
 
-@st.cache_data(show_spinner="Running Siamese CNN inference...")
-def run_ai_prediction(_detector, image1, image2):
-    return _detector.predict(image1, image2)
-
-
 @st.cache_data(show_spinner="Running U-Net inference...")
 def run_unet_prediction(_detector, image1, image2):
     return _detector.predict(image1, image2)
+
+
+@st.cache_data(show_spinner="Fetching satellite imagery...")
+def run_satellite_fetch(bbox, year):
+    return fetch_sentinel2_image(
+        bbox, year, image_size=config["model"]["image_size"]
+    )
 
 # -----------------------------------
 # Streamlit Config
@@ -135,38 +128,10 @@ st.sidebar.header("Input Images")
 
 input_mode = st.sidebar.radio(
     "Image source",
-    ["Sample dataset", "Upload your own"]
+    ["Upload your own", "Pick on map"]
 )
 
-if input_mode == "Sample dataset":
-
-    sample_images = get_sample_images()
-
-    image_names = [img.name for img in sample_images]
-
-    if len(image_names) < 2:
-
-        st.error(
-            "Please add at least 2 images inside data/samples/"
-        )
-
-        st.stop()
-
-    selected_image1 = st.sidebar.selectbox(
-        "Select Historical Image",
-        image_names
-    )
-
-    selected_image2 = st.sidebar.selectbox(
-        "Select Recent Image",
-        image_names,
-        index=min(1, len(image_names) - 1)
-    )
-
-    image1_source = Path("data/samples") / selected_image1
-    image2_source = Path("data/samples") / selected_image2
-
-else:
+if input_mode == "Upload your own":
 
     image1_source = st.sidebar.file_uploader(
         "Historical image",
@@ -189,29 +154,149 @@ else:
         "(LEVIR-CD) — predictions are most meaningful on similar imagery."
     )
 
+else:
+    image1_source = image2_source = None
+
 # -----------------------------------
 # Load Images
 # -----------------------------------
 
 logger.info("Loading satellite images")
 
-try:
-    image1 = load_image(image1_source)
-    image2 = load_image(image2_source)
-except Exception:
-    st.error(
-        "Could not read one of the images — please provide valid "
-        "PNG/JPG image files."
+if input_mode == "Pick on map":
+
+    # Handled further down, once the user has drawn an area and fetched
+    # imagery — the map needs the full-width main area, not the sidebar.
+    pass
+
+else:
+
+    try:
+        image1 = load_image(image1_source)
+        image2 = load_image(image2_source)
+    except Exception:
+        st.error(
+            "Could not read one of the images — please provide valid "
+            "PNG/JPG image files."
+        )
+        st.stop()
+
+    image1 = resize_image(image1)
+    image2 = resize_image(image2)
+
+# -----------------------------------
+# Pick on Map
+# -----------------------------------
+
+if input_mode == "Pick on map":
+
+    st.subheader("Pick an Area and Year Range")
+
+    st.caption(
+        "Draw a rectangle, choose two years, then fetch. Uses free "
+        "Sentinel-2 imagery (10m/pixel) — this shows regional development "
+        "trends, not building-level detail like the other two modes "
+        "(the models were trained on 0.5m/pixel imagery)."
     )
-    st.stop()
 
-# -----------------------------------
-# Resize Images
-# -----------------------------------
+    map_col, controls_col = st.columns([2, 1])
 
-image1 = resize_image(image1)
+    with map_col:
 
-image2 = resize_image(image2)
+        area_map = folium.Map(location=[20.5937, 78.9629], zoom_start=5)
+
+        Draw(
+            export=False,
+            draw_options={
+                "rectangle": True,
+                "polygon": False,
+                "circle": False,
+                "marker": False,
+                "circlemarker": False,
+                "polyline": False
+            },
+            edit_options={"edit": False}
+        ).add_to(area_map)
+
+        map_state = st_folium(
+            area_map, height=350, width=550, key="area_map"
+        )
+
+    with controls_col:
+
+        current_year = date.today().year
+
+        start_year = st.number_input(
+            "Historical year",
+            min_value=2017,
+            max_value=current_year,
+            value=2018
+        )
+
+        end_year = st.number_input(
+            "Recent year",
+            min_value=2017,
+            max_value=current_year,
+            value=current_year
+        )
+
+        if end_year <= start_year:
+            st.warning("Pick a recent year later than the historical year.")
+
+        fetch_clicked = st.button(
+            "Fetch satellite imagery", width='stretch'
+        )
+
+    drawing = map_state.get("last_active_drawing") if map_state else None
+
+    if drawing is None:
+        st.info("Draw a rectangle on the map to select an area.")
+        st.stop()
+
+    coords = drawing["geometry"]["coordinates"][0]
+    lons = [c[0] for c in coords]
+    lats = [c[1] for c in coords]
+    bbox = (min(lons), min(lats), max(lons), max(lats))
+
+    if (bbox[2] - bbox[0] > 1.0) or (bbox[3] - bbox[1] > 1.0):
+        st.warning(
+            "That area is quite large — the fetched image is a single "
+            "downsampled crop of it, so detail will be limited. Consider "
+            "drawing a smaller box."
+        )
+
+    if fetch_clicked:
+        st.session_state["map_bbox"] = bbox
+        st.session_state["map_start_year"] = start_year
+        st.session_state["map_end_year"] = end_year
+
+    if "map_bbox" not in st.session_state:
+        st.info(
+            "Draw an area and click \"Fetch satellite imagery\" to "
+            "continue."
+        )
+        st.stop()
+
+    try:
+        image1, item1 = run_satellite_fetch(
+            st.session_state["map_bbox"], st.session_state["map_start_year"]
+        )
+        image2, item2 = run_satellite_fetch(
+            st.session_state["map_bbox"], st.session_state["map_end_year"]
+        )
+    except SatelliteFetchError as exc:
+        st.error(str(exc))
+        st.stop()
+
+    st.caption(
+        f"Historical: {item1.properties['datetime'][:10]} "
+        f"(cloud cover {item1.properties['eo:cloud_cover']:.1f}%) — "
+        f"Recent: {item2.properties['datetime'][:10]} "
+        f"(cloud cover {item2.properties['eo:cloud_cover']:.1f}%)"
+    )
+
+    image1 = resize_image(image1)
+    image2 = resize_image(image2)
 
 # -----------------------------------
 # Satellite Comparison
@@ -237,91 +322,51 @@ diff_map, cleaned_map = run_classical_diff(
     image2
 )
 
-# -----------------------------------
-# Heatmap Visualization
-# -----------------------------------
-
-st.subheader("Urban Growth Heatmap")
-
-heatmap_fig = plot_change_heatmap(
-    diff_map
-)
-
-st.pyplot(heatmap_fig)
-
-# -----------------------------------
-# Binary Change Regions
-# -----------------------------------
-
-st.subheader("Detected Development Regions")
-
-st.image(
-    cleaned_map,
-    caption="Detected Urban Changes",
-    use_container_width=True
-)
-
-# -----------------------------------
-# Overlay Visualization
-# -----------------------------------
-
-st.subheader("Urban Growth Overlay Visualization")
-
 overlay_image = create_overlay(
     image2,
     cleaned_map,
     alpha=config["visualization"]["heatmap_opacity"]
 )
 
-st.image(
-    overlay_image,
-    caption="Highlighted Development Regions",
-    use_container_width=True
+st.subheader("Classical Change Detection")
+
+st.caption(
+    "A simple, non-AI baseline: raw pixel differences between the two "
+    "images, cleaned up and highlighted."
 )
 
+classical_col1, classical_col2, classical_col3 = st.columns(3)
+
+with classical_col1:
+    st.pyplot(plot_change_heatmap(diff_map))
+    st.caption("Raw difference heatmap")
+
+with classical_col2:
+    st.image(
+        cleaned_map,
+        caption="Detected changes (cleaned up)",
+        width='stretch'
+    )
+
+with classical_col3:
+    st.image(
+        overlay_image,
+        caption="Highlighted on recent image",
+        width='stretch'
+    )
+
 # -----------------------------------
-# AI-Based Prediction
+# AI-Based Prediction (U-Net)
 # -----------------------------------
 
 st.subheader("AI-Based Urban Change Prediction")
 
 st.caption(
-    "Siamese CNN — trained from scratch on LEVIR-CD (445 pairs), "
-    "test-set IoU 0.10. Weaker of the two models; see README for why."
+    "U-Net, trained from scratch on LEVIR-CD (445 pairs) — test-set IoU "
+    "0.44. See the plain-language summary below for what that means."
 )
 
 logger.info("Running AI inference")
-
-# Interactive threshold slider
-threshold = st.slider(
-    "AI Detection Threshold",
-    min_value=0,
-    max_value=255,
-    value=127
-)
-
-# Run prediction
-ai_prediction = run_ai_prediction(
-    ai_detector,
-    image1,
-    image2
-)
-
-# Create thresholded prediction
-thresholded_prediction = (
-    ai_prediction > threshold
-).astype(np.uint8) * 255
-
-# -----------------------------------
-# U-Net Prediction
-# -----------------------------------
-
-st.subheader("U-Net Urban Change Prediction")
-
-st.caption(
-    "U-Net — trained from scratch on LEVIR-CD (445 pairs), "
-    "test-set IoU 0.44. The stronger of the two models."
-)
 
 unet_prediction = run_unet_prediction(
     unet_detector,
@@ -329,101 +374,30 @@ unet_prediction = run_unet_prediction(
     image2
 )
 
-unet_fig = plot_ai_prediction(
-    unet_prediction
-)
-
-st.pyplot(unet_fig)
-
-st.image(
-    unet_prediction,
-    caption="U-Net Segmentation Prediction",
-    use_container_width=True
-)
-
-# -----------------------------------
-# Explainable AI Visualization
-# -----------------------------------
-
-st.subheader("Explainable AI Attention Visualization")
-
 attention_overlay = generate_attention_overlay(
     image2,
     unet_prediction,
     alpha=config["visualization"]["heatmap_opacity"]
 )
 
-st.image(
-    attention_overlay,
-    caption="AI Attention Overlay",
-    use_container_width=True
-)
+unet_col1, unet_col2, unet_col3 = st.columns(3)
 
-# -----------------------------------
-# AI Confidence Heatmap
-# -----------------------------------
+with unet_col1:
+    st.pyplot(plot_ai_prediction(unet_prediction))
+    st.caption("Confidence heatmap")
 
-ai_fig = plot_ai_prediction(
-    ai_prediction
-)
-
-st.pyplot(ai_fig)
-
-# -----------------------------------
-# Thresholded Prediction
-# -----------------------------------
-
-st.image(
-    thresholded_prediction,
-    caption="Thresholded AI Prediction",
-    use_container_width=True
-)
-
-# -----------------------------------
-# AI Evaluation Metrics
-# -----------------------------------
-
-st.subheader("AI Evaluation Metrics")
-
-# Reference: no labeled ground-truth masks are available for the sample
-# imagery, so these scores measure agreement with the classical CV diff
-# (`cleaned_map`), not accuracy against verified ground truth.
-iou_score = calculate_iou(
-    thresholded_prediction,
-    cleaned_map
-)
-
-precision_score = calculate_precision(
-    thresholded_prediction,
-    cleaned_map
-)
-
-recall_score = calculate_recall(
-    thresholded_prediction,
-    cleaned_map
-)
-
-metric_col1, metric_col2, metric_col3 = st.columns(3)
-
-with metric_col1:
-
-    st.metric(
-        "IoU Score",
-        iou_score
+with unet_col2:
+    st.image(
+        unet_prediction,
+        caption="Segmentation prediction",
+        width='stretch'
     )
 
-with metric_col2:
-
-    st.metric(
-        "Precision",
-        precision_score
-    )
-
-with metric_col3:
-
-    st.metric(
-        "Recall",
-        recall_score
+with unet_col3:
+    st.image(
+        attention_overlay,
+        caption="Attention overlay",
+        width='stretch'
     )
 
 # -----------------------------------
@@ -449,13 +423,9 @@ density_score = estimate_density(
     cleaned_map
 )
 
-# -----------------------------------
-# Metrics Layout
-# -----------------------------------
+analytics_col1, analytics_col2 = st.columns(2)
 
-col1, col2 = st.columns(2)
-
-with col1:
+with analytics_col1:
 
     st.metric(
         "Urban Change %",
@@ -467,7 +437,7 @@ with col1:
         f"{vegetation_loss}"
     )
 
-with col2:
+with analytics_col2:
 
     st.metric(
         "Infrastructure Growth Score",
@@ -478,6 +448,63 @@ with col2:
         "Development Density",
         f"{density_score}"
     )
+
+# -----------------------------------
+# Plain-Language Summary
+# -----------------------------------
+
+st.divider()
+
+st.subheader("📋 What Does This Mean?")
+
+if change_percentage < 5:
+    level_icon = "🟢"
+    level_text = "very little change"
+    level_detail = (
+        "The two images look largely the same — no notable development "
+        "was detected in this area."
+    )
+elif change_percentage < 15:
+    level_icon = "🟡"
+    level_text = "a moderate amount of change"
+    level_detail = (
+        "Some parts of this area look different between the two images — "
+        "likely a mix of new construction, roadwork, or land clearing."
+    )
+else:
+    level_icon = "🔴"
+    level_text = "a significant amount of change"
+    level_detail = (
+        "Large parts of this area look different between the two images "
+        "— likely substantial new construction or land-use change."
+    )
+
+st.info(
+    f"{level_icon} **Overall: {level_text}.** About "
+    f"**{change_percentage}%** of the area appears different between the "
+    f"historical and recent image. {level_detail}"
+)
+
+if vegetation_loss > 5:
+    st.info(
+        "🌳 **Greenery appears to have decreased** in the more recent "
+        "image — a common sign that trees, farmland, or open land is "
+        "being cleared, often to make way for construction."
+    )
+else:
+    st.info(
+        "🌳 **No meaningful loss of greenery** was detected between the "
+        "two images."
+    )
+
+st.warning(
+    "🤖 **How much should you trust this?** In testing on real satellite "
+    "imagery the AI model had never seen before, it correctly identified "
+    "genuine changes about **44 out of 100 times** (in ML terms, a "
+    "test-set IoU of 0.44). Treat every result on this page as a "
+    "**helpful pointer toward areas worth a closer look** — not a "
+    "certain, verified fact."
+)
 
 # -----------------------------------
 # Footer Logging

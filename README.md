@@ -12,7 +12,7 @@ analytics.
 
 - `app/models/` — Siamese CNN and U-Net architectures, dataset, training loop
 - `app/inference/` — inference wrappers, classical CV detector, metrics
-- `app/preprocessing/` — image loading/resizing, sample-data discovery
+- `app/preprocessing/` — image loading/resizing, live satellite imagery fetch
 - `app/visualization/` — matplotlib/OpenCV plotting helpers
 - `app/frontend/streamlit_app.py` — the Streamlit UI (primary product)
 - `app/api/main.py` — a standalone FastAPI `/predict` endpoint (U-Net only)
@@ -45,9 +45,16 @@ Streamlit UI:
 streamlit run app/frontend/streamlit_app.py
 ```
 
-Pick "Upload your own" in the sidebar to try it on your own before/after
-image pair instead of the bundled samples — works best on aerial/satellite
-imagery similar to what the models were trained on (see Results below).
+Two ways to feed it images, picked in the sidebar:
+- **Upload your own** — any before/after PNG/JPG pair; works best on
+  aerial/satellite imagery similar to what the models were trained on.
+- **Pick on map** — draw a rectangle on an interactive map and choose two
+  years; fetches real Sentinel-2 imagery for that area/year via Microsoft's
+  free Planetary Computer API (no account/key needed). Sentinel-2 is
+  10m/pixel — far coarser than the 0.5m/pixel LEVIR-CD imagery the models
+  were trained on — so this mode reads as regional development trends, not
+  building-level detection.
+
 Model checkpoints load once and are cached across interactions
 (`st.cache_resource`/`st.cache_data`), so moving the threshold slider doesn't
 re-run inference from scratch.

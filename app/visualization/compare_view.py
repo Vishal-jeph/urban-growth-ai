@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 
 
 def plot_comparison(image1, image2):
-    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+    fig, axes = plt.subplots(1, 2, figsize=(8, 4))
 
     axes[0].imshow(image1)
     axes[0].set_title("Historical Image")
