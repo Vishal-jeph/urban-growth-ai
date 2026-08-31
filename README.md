@@ -8,6 +8,10 @@ two learned models — a lightweight Siamese CNN and a U-Net — and reports
 change heatmaps, overlays, an explainability view, and simple urban-growth
 analytics.
 
+# Online Demo 
+
+https://urbangrowth.streamlit.app/
+
 ## Project layout
 
 - `app/models/` — Siamese CNN and U-Net architectures, dataset, training loop
