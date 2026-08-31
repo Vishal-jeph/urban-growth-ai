@@ -5,18 +5,22 @@ fastapi
 uvicorn[standard]
 python-multipart
 
-# The "+cpu" build variant only exists for Linux/Windows wheels on the
-# PyTorch index; on macOS the plain version *is* the CPU build.
-torch==2.2.2+cpu; sys_platform != "darwin"
-torch==2.2.2; sys_platform == "darwin"
-torchvision==0.17.2+cpu; sys_platform != "darwin"
-torchvision==0.17.2; sys_platform == "darwin"
+# Deliberately NOT pinned to an exact patch version (e.g. torch==2.2.2):
+# hosting platforms (Streamlit Community Cloud included) periodically bump
+# their default Python version out from under you, and PyTorch only builds
+# wheels for a given Python ABI some time after that Python's release — an
+# exact old pin then has *no* matching wheel and the deploy fails outright.
+# A flexible lower bound lets pip pick whatever CPU build actually exists
+# for the interpreter in use. The CPU index above + PEP 440 local-version
+# precedence (X.Y.Z+cpu sorts above plain X.Y.Z) means pip still prefers
+# the CPU-only build over a much larger CUDA-bundled default when both
+# exist for the same version. Checkpoints here are plain state_dicts, which
+# load fine across this version range (verified against torch 2.8/numpy 2).
+torch>=2.2
+torchvision>=0.17
 
-# opencv-python-headless>=5 requires numpy>=2, which conflicts with
-# torch==2.2.2 / torchvision==0.17.2 (they predate NumPy 2.0 ABI support and
-# crash with "Numpy is not available" on it). Pin both to stay compatible.
-opencv-python-headless==4.11.0.86
-numpy<2
+opencv-python-headless>=4.8
+numpy>=1.24
 pandas
 matplotlib
 scikit-image
